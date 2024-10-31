@@ -212,6 +212,13 @@ fork(void)
 
   pid = np->pid;
 
+  if (stride_scheduler) {
+    np->tickets = TICKETS_INIT;
+    np->stride = STRIDE1/np->tickets;
+    np->pass = 0;
+    np->remain = np->stride;
+  }
+
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
@@ -311,22 +318,68 @@ wait(void)
   }
 }
 
-//PAGEBREAK: 42
-// Per-CPU process scheduler.
-// Each CPU calls scheduler() after setting itself up.
-// Scheduler never returns.  It loops, doing:
-//  - choose a process to run
-//  - swtch to start running that process
-//  - eventually that process transfers control
-//      via swtch back to the scheduler.
-void
-scheduler(void)
+int
+getticks(void)
 {
+  uint xticks;
+
+  acquire(&tickslock);
+  xticks = ticks;
+  release(&tickslock);
+  return xticks;
+}
+
+#ifdef STRIDE
+int stride_scheduler = 1;
+#elif RR
+int stride_scheduler = 0;
+#endif
+
+void
+sched_roundrobin(void) {
+
+  cprintf("running RR scheduler\n");
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
-  for(;;){
+
+  for(;;) {
+    // Enable interrupts on this processor.
+    sti();
+
+    // Loop over process table looking for process to run.
+    acquire(&ptable.lock);
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->state != RUNNABLE)
+        continue;
+
+      // Switch to chosen process.  It is the process's job
+      // to release ptable.lock and then reacquire it
+      // before jumping back to us.
+      c->proc = p;
+      switchuvm(p);
+      p->state = RUNNING;
+      
+      swtch(&(c->scheduler), p->context);
+      switchkvm();
+
+      // Process is done running for now.
+      // It should have changed its p->state before coming back.
+      c->proc = 0;
+    }
+    release(&ptable.lock);
+  }
+}
+
+void
+sched_stride(void) {
+
+  cprintf("Running stride scheduler\n");
+  struct proc *p;
+  struct cpu *c = mycpu();
+  c->proc = 0;
+
+  for(;;) {
     // Enable interrupts on this processor.
     sti();
 
@@ -343,6 +396,9 @@ scheduler(void)
       switchuvm(p);
       p->state = RUNNING;
 
+      // cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
+      p->last_scheduled = getticks();
+      
       swtch(&(c->scheduler), p->context);
       switchkvm();
 
@@ -351,7 +407,25 @@ scheduler(void)
       c->proc = 0;
     }
     release(&ptable.lock);
+  }
+}
 
+//PAGEBREAK: 42
+// Per-CPU process scheduler.
+// Each CPU calls scheduler() after setting itself up.
+// Scheduler never returns.  It loops, doing:
+//  - choose a process to run
+//  - swtch to start running that process
+//  - eventually that process transfers control
+//      via swtch back to the scheduler.
+void
+scheduler(void)
+{
+  for (;;) {
+    if (stride_scheduler)
+      sched_stride();
+    else
+      sched_roundrobin();
   }
 }
 
@@ -377,6 +451,11 @@ sched(void)
   if(readeflags()&FL_IF)
     panic("sched interruptible");
   intena = mycpu()->intena;
+  if (stride_scheduler) {
+    p->last_interrupted = getticks();
+    p->runtime += p->last_interrupted - p->last_scheduled;
+  }
+  // cprintf("process %s switching back to scheduler at %d ticks\n", p->name, getticks());
   swtch(&p->context, mycpu()->scheduler);
   mycpu()->intena = intena;
 }
