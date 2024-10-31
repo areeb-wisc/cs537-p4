@@ -15,6 +15,7 @@ extern int ncpu;
 extern int global_tickets;
 extern int global_stride;
 extern int global_pass;
+extern int stride_scheduler;
 
 //PAGEBREAK: 17
 // Saved registers for kernel context switches.
@@ -57,6 +58,10 @@ struct proc {
   int tickets;                 // number of tickets
   int stride;                  // this process's stride
   int pass;                    // this process's pass
+  int remain;                  // this process's remainining stride
+  int last_scheduled;           // the tick at which this process was last scheduled
+  int last_interrupted;        // the tick at which this process was last interrupted
+  int runtime;                 // total ticks this process has run for
 };
 
 // Process memory is laid out contiguously, low addresses first:
