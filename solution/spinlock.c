@@ -25,8 +25,12 @@ void
 acquire(struct spinlock *lk)
 {
   pushcli(); // disable interrupts to avoid deadlock.
-  if(holding(lk))
-    panic("acquire");
+  if(holding(lk)) {
+    cprintf("acquire lock: %s failed, PID: %d name: %s\n", lk->name, lk->cpu->proc->pid, lk->cpu->proc->name);
+    // for (int i = 0; i < 10; i++)
+    //   cprintf("pcs[%d] = %d\n", i, lk->pcs[i]);
+    panic("acquire lock");
+  }
 
   // The xchg is atomic.
   while(xchg(&lk->locked, 1) != 0)
@@ -46,8 +50,10 @@ acquire(struct spinlock *lk)
 void
 release(struct spinlock *lk)
 {
-  if(!holding(lk))
+  if(!holding(lk)) {
+    cprintf("release lock: %s failed, PID: %d name: %s\n", lk->name, lk->cpu->proc->pid, lk->cpu->proc->name);
     panic("release");
+  }
 
   lk->pcs[0] = 0;
   lk->cpu = 0;

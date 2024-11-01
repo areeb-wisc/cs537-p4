@@ -7,6 +7,12 @@
 #include "proc.h"
 #include "spinlock.h"
 
+#ifdef STRIDE
+int stride_scheduler = 1;
+#elif RR
+int stride_scheduler = 0;
+#endif
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -149,6 +155,16 @@ userinit(void)
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
+  if (stride_scheduler) {
+    cprintf("adding stride details for PID: %d in userinit()\n", p->pid);
+    p->tickets = TICKETS_INIT;
+    p->stride = STRIDE1/p->tickets;
+    p->pass = 0;
+    p->remain = p->stride;
+    p->last_scheduled = 0;
+    p->last_interrupted = 0;
+    p->runtime = 0;
+  }
 
   release(&ptable.lock);
 }
@@ -212,16 +228,21 @@ fork(void)
 
   pid = np->pid;
 
-  if (stride_scheduler) {
-    np->tickets = TICKETS_INIT;
-    np->stride = STRIDE1/np->tickets;
-    np->pass = 0;
-    np->remain = np->stride;
-  }
 
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+
+  if (stride_scheduler) {
+    cprintf("adding stride details for PID: %d in fork()\n", pid);
+    np->tickets = TICKETS_INIT;
+    np->stride = STRIDE1/np->tickets;
+    np->pass = 0;
+    np->remain = np->stride;
+    np->last_scheduled = 0;
+    np->last_interrupted = 0;
+    np->runtime = 0;
+  }
 
   release(&ptable.lock);
 
@@ -323,20 +344,19 @@ getticks(void)
 {
   uint xticks;
 
+  // cprintf("getting tickslock\n");
   acquire(&tickslock);
+  // cprintf("got tickslock\n");
   xticks = ticks;
+  // cprintf("releasing tickslock\n");
   release(&tickslock);
+  // cprintf("released ticklock\n");
   return xticks;
 }
 
-#ifdef STRIDE
-int stride_scheduler = 1;
-#elif RR
-int stride_scheduler = 0;
-#endif
-
 void
-sched_roundrobin(void) {
+sched_RR(void)
+{
 
   cprintf("running RR scheduler\n");
   struct proc *p;
@@ -349,10 +369,11 @@ sched_roundrobin(void) {
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
+    // cprintf("acquired ptable lock\n");
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
-
+      cprintf("chosen process PID: %d\n", p->pid);
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
@@ -360,7 +381,9 @@ sched_roundrobin(void) {
       switchuvm(p);
       p->state = RUNNING;
       
+      cprintf("switching to PID: %d\n",p->pid);
       swtch(&(c->scheduler), p->context);
+      cprintf("got back from PID: %d\n",p->pid);
       switchkvm();
 
       // Process is done running for now.
@@ -371,8 +394,63 @@ sched_roundrobin(void) {
   }
 }
 
+// ----------------------STRIDE SCHEDULER HELPERS START -----------------------------
+
+typedef struct _minheap {
+    struct proc arr[NPROC];
+    int size;
+} minheap;
+
+int parent(int idx) {
+    return (idx - 1)/2;
+}
+
+int compare(struct proc* p1, struct proc* p2) {
+    if (p1->pass != p2->pass)
+        return p1->pass < p2->pass ? -1 : 1;
+    if (p1->runtime != p2->runtime)
+        return p1->runtime < p2->runtime ? -1 : 1;
+    if (p1->pid != p2->pid)
+        return p1->pid < p2->pid ? -1 : 1;
+    return 0;
+}
+
+int greater(struct proc* p1, struct proc* p2) {
+    return compare(p1,p2) > 0;
+}
+
+void swap(struct proc* p1, struct proc* p2) {
+    struct proc temp = *p1;
+    *p1 = *p2;
+    *p2 = temp;
+}
+
+int push(minheap* h, struct proc* p) {
+    if (h->size == NPROC)
+        return -1;
+    int idx = h->size;
+    h->arr[idx] = *p;
+    while (idx != 0 && greater(&h->arr[parent(idx)],&h->arr[idx])) {
+        swap(&h->arr[idx],&h->arr[parent(idx)]);
+        idx = parent(idx);
+    }
+    h->size++;
+    return 0;
+}
+
+struct proc* getmin(minheap* h) {
+    return &h->arr[0];
+}
+
+// ----------------------STRIDE SCHEDULER HELPERS END -----------------------------
+
+int entry_flag = 0;
+char* entering = "entering swtch()";
+char* exiting = "exiting swtch()";
+
 void
-sched_stride(void) {
+sched_stride(void)
+{
 
   cprintf("Running stride scheduler\n");
   struct proc *p;
@@ -380,33 +458,65 @@ sched_stride(void) {
   c->proc = 0;
 
   for(;;) {
+    cprintf("enabling interrupts\n");
     // Enable interrupts on this processor.
     sti();
 
     // Loop over process table looking for process to run.
-    acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+    // acquire(&ptable.lock);
+    // cprintf("acquired lock\n");
 
+    minheap heap;
+    heap.size = 0;
+
+    cprintf("starting loop\n");
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+      // cprintf("checking process: %d\n", p->pid);
+      if(p->state == RUNNABLE) {
+        cprintf("adding PID: %d pass: %d rtime: %d to heap\n", p->pid, p->pass, p->runtime);
+        push(&heap, p);
+      }
+    }
+
+    if (heap.size > 0) {
+      struct proc* minproc = getmin(&heap);
+      p = minproc;
+      // p = &ptable.proc[0];
+      cprintf("chosen process PID: %d\n", p->pid);
+      
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
       c->proc = p;
       switchuvm(p);
+
+      acquire(&ptable.lock);
+      cprintf("acquired lock\n");
       p->state = RUNNING;
 
       // cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
       p->last_scheduled = getticks();
       
+      cprintf("switching to PID: %d, entry_flag = %d\n", p->pid, entry_flag);
+      // release(&ptable.lock);
       swtch(&(c->scheduler), p->context);
+      // acquire(&ptable.lock);
+      cprintf("got back from PID: %d, entry_flag = %d\n", p->pid, entry_flag);
+
+      p->last_interrupted = getticks();
+      p->runtime += p->last_interrupted - p->last_scheduled;
+
       switchkvm();
 
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
+      cprintf("releasing lock\n");
+      release(&ptable.lock);
     }
-    release(&ptable.lock);
+
+    // cprintf("releasing lock\n");
+    // release(&ptable.lock);
   }
 }
 
@@ -422,10 +532,11 @@ void
 scheduler(void)
 {
   for (;;) {
+    cprintf("scheduler()\n");
     if (stride_scheduler)
       sched_stride();
     else
-      sched_roundrobin();
+      sched_RR();
   }
 }
 
@@ -451,10 +562,11 @@ sched(void)
   if(readeflags()&FL_IF)
     panic("sched interruptible");
   intena = mycpu()->intena;
-  if (stride_scheduler) {
-    p->last_interrupted = getticks();
-    p->runtime += p->last_interrupted - p->last_scheduled;
-  }
+
+  // if (stride_scheduler) {
+  //   p->last_interrupted = getticks();
+  //   p->runtime += p->last_interrupted - p->last_scheduled;
+  // }
   // cprintf("process %s switching back to scheduler at %d ticks\n", p->name, getticks());
   swtch(&p->context, mycpu()->scheduler);
   mycpu()->intena = intena;
@@ -464,7 +576,9 @@ sched(void)
 void
 yield(void)
 {
+  cprintf("PID: %d yielding\n", myproc()->pid);
   acquire(&ptable.lock);  //DOC: yieldlock
+  cprintf("made PID: %d changed %s -> RUNNABLE\n", myproc()->pid, myproc()->state);
   myproc()->state = RUNNABLE;
   sched();
   release(&ptable.lock);
