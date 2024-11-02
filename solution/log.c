@@ -53,6 +53,7 @@ static void commit();
 void
 initlog(int dev)
 {
+  cprintf("initlog()\n");
   if (sizeof(struct logheader) >= BSIZE)
     panic("initlog: too big logheader");
 

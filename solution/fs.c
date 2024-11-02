@@ -31,6 +31,7 @@ struct superblock sb;
 void
 readsb(int dev, struct superblock *sb)
 {
+  cprintf("readsb()\n");
   struct buf *bp;
 
   bp = bread(dev, 1);

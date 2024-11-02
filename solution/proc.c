@@ -607,15 +607,17 @@ forkret(void)
 {
   static int first = 1;
   // Still holding ptable.lock from scheduler.
-  cprintf("new process PID: %d, name: %s releasing scheduler lock in forkret()\n", myproc()->pid, myproc()->name);
   release(&ptable.lock);
+  cprintf("hello new process PID: %d, name: %s released scheduler lock in forkret()\n", myproc()->pid, myproc()->name);
 
   if (first) {
     // Some initialization functions must be run in the context
     // of a regular process (e.g., they call sleep), and thus cannot
     // be run from main().
     first = 0;
+    cprintf("calling iinit() from forkret()\n");
     iinit(ROOTDEV);
+    cprintf("calling initlog() from forkret()\n");
     initlog(ROOTDEV);
   }
 

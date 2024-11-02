@@ -137,6 +137,7 @@ ideintr(void)
 void
 iderw(struct buf *b)
 {
+  cprintf("iderw in ide.c called()\n");
   struct buf **pp;
 
   if(!holdingsleep(&b->lock))

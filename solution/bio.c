@@ -96,6 +96,7 @@ bget(uint dev, uint blockno)
 struct buf*
 bread(uint dev, uint blockno)
 {
+  cprintf("bread()\n");
   struct buf *b;
 
   b = bget(dev, blockno);
