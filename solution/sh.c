@@ -144,6 +144,7 @@ getcmd(char *buf, int nbuf)
 int
 main(void)
 {
+  printf(1, "started sh!\n");
   static char buf[100];
   int fd;
 

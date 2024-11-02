@@ -396,9 +396,18 @@ sys_chdir(void)
 int
 sys_exec(void)
 {
+  cprintf("sys_exec() called\n");
   char *path, *argv[MAXARG];
   int i;
   uint uargv, uarg;
+
+  int rc1 = argstr(0, &path);
+  int rc2 = argint(1, (int*)&uargv);
+
+  cprintf("path = %s, uargv = %d\n", path, uargv);
+
+  if (rc1 < 0 || rc2 < 0)
+    return -1;
 
   if(argstr(0, &path) < 0 || argint(1, (int*)&uargv) < 0){
     return -1;
@@ -416,6 +425,7 @@ sys_exec(void)
     if(fetchstr(uarg, &argv[i]) < 0)
       return -1;
   }
+  cprintf("calling exec() from sys_exec()\n");
   return exec(path, argv);
 }
 

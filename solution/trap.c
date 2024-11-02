@@ -36,9 +36,13 @@ idtinit(void)
 void
 trap(struct trapframe *tf)
 {
+  cprintf("Trap number: %d occured\n", tf->trapno);
+  cprintf("syscall number: %d\n", tf->eax);
   if(tf->trapno == T_SYSCALL){
-    if(myproc()->killed)
+    if(myproc()->killed) {
+      cprintf("trap says PID: %d name: %s is killed, o/w syscall number is: %d\n", myproc()->pid, myproc()->name, myproc()->tf->eax);
       exit();
+    }
     myproc()->tf = tf;
     syscall();
     if(myproc()->killed)
@@ -80,6 +84,7 @@ trap(struct trapframe *tf)
 
   //PAGEBREAK: 13
   default:
+    cprintf("default trap handler\n");
     if(myproc() == 0 || (tf->cs&3) == 0){
       // In kernel, it must be our mistake.
       cprintf("unexpected trap %d from cpu %d eip %x (cr2=0x%x)\n",

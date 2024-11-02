@@ -83,19 +83,23 @@ allocproc(void)
   char *sp;
 
   acquire(&ptable.lock);
+  cprintf("allocproc() acquired ptable.lock\n");
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
       goto found;
 
   release(&ptable.lock);
+  cprintf("allocproc() released ptable.lock\n");
   return 0;
 
 found:
+  cprintf("allocproc() found UNUSED slot at idx: %d\n", p - ptable.proc);
   p->state = EMBRYO;
   p->pid = nextpid++;
 
   release(&ptable.lock);
+  cprintf("allocproc() released ptable.lock\n");
 
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
@@ -152,9 +156,11 @@ userinit(void)
   // run this process. the acquire forces the above
   // writes to be visible, and the lock is also needed
   // because the assignment might not be atomic.
+  cprintf("userinit() trying to get ptable.lock\n");
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
+  cprintf("made PID: %d name: %s RUNNABLE\n", p->pid, p->name);
   if (stride_scheduler) {
     cprintf("adding stride details for PID: %d in userinit()\n", p->pid);
     p->tickets = TICKETS_INIT;
@@ -167,6 +173,7 @@ userinit(void)
   }
 
   release(&ptable.lock);
+  cprintf("userinit() released ptable.lock\n");
 }
 
 // Grow current process's memory by n bytes.
@@ -204,6 +211,7 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
+  cprintf("PID: %d forked new PID: %d\n", curproc->pid, np->pid);
 
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
@@ -256,6 +264,7 @@ void
 exit(void)
 {
   struct proc *curproc = myproc();
+  cprintf("exit() called form PID: %d\n", curproc->pid);
   struct proc *p;
   int fd;
 
@@ -305,6 +314,7 @@ wait(void)
   struct proc *curproc = myproc();
   
   acquire(&ptable.lock);
+  cprintf("PID: %d, name: %s acquired ptable lock in wait()\n", curproc->pid, curproc->name);
   for(;;){
     // Scan through table looking for exited children.
     havekids = 0;
@@ -324,17 +334,20 @@ wait(void)
         p->killed = 0;
         p->state = UNUSED;
         release(&ptable.lock);
+        cprintf("PID: %d, name: %s released ptable lock in wait() 1\n", curproc->pid, curproc->name);
         return pid;
       }
     }
 
     // No point waiting if we don't have any children.
     if(!havekids || curproc->killed){
+      cprintf("PID: %d, name: %s released ptable lock in wait() 2\n", curproc->pid, curproc->name);
       release(&ptable.lock);
       return -1;
     }
 
     // Wait for children to exit.  (See wakeup1 call in proc_exit.)
+    cprintf("PID: %d, name: %s in wait() calling sleep() with lock held\n", curproc->pid, curproc->name);
     sleep(curproc, &ptable.lock);  //DOC: wait-sleep
   }
 }
@@ -352,6 +365,7 @@ getticks(void)
   release(&tickslock);
   // cprintf("released ticklock\n");
   return xticks;
+  // return 0;
 }
 
 void
@@ -365,11 +379,13 @@ sched_RR(void)
 
   for(;;) {
     // Enable interrupts on this processor.
-    sti();
+    // cprintf("enbaling interrupts\n");
+    // sti();
 
     // Loop over process table looking for process to run.
+    cprintf("trying to acquire lock\n");
     acquire(&ptable.lock);
-    // cprintf("acquired ptable lock\n");
+    cprintf("acquired ptable lock\n");
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
@@ -385,12 +401,13 @@ sched_RR(void)
       swtch(&(c->scheduler), p->context);
       cprintf("got back from PID: %d\n",p->pid);
       switchkvm();
-
+      cprintf("swicthedkvm() done\n");
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
     }
     release(&ptable.lock);
+    cprintf("released lock\n");
   }
 }
 
@@ -458,18 +475,19 @@ sched_stride(void)
   c->proc = 0;
 
   for(;;) {
-    cprintf("enabling interrupts\n");
+    cprintf("---------SCHEDULER LOOP -------------\n");
     // Enable interrupts on this processor.
-    sti();
+    // sti();
 
     // Loop over process table looking for process to run.
-    // acquire(&ptable.lock);
-    // cprintf("acquired lock\n");
+    acquire(&ptable.lock);
+    cprintf("acquired lock\n");
 
+    // for (int k = 0; k < NPROC; k++) {
     minheap heap;
     heap.size = 0;
 
-    cprintf("starting loop\n");
+    // cprintf("starting loop\n");
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
       // cprintf("checking process: %d\n", p->pid);
       if(p->state == RUNNABLE) {
@@ -482,7 +500,7 @@ sched_stride(void)
       struct proc* minproc = getmin(&heap);
       p = minproc;
       // p = &ptable.proc[0];
-      cprintf("chosen process PID: %d\n", p->pid);
+      cprintf("chosen process PID: %d, name: %s\n", p->pid, p->name);
       
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
@@ -490,8 +508,8 @@ sched_stride(void)
       c->proc = p;
       switchuvm(p);
 
-      acquire(&ptable.lock);
-      cprintf("acquired lock\n");
+      // acquire(&ptable.lock);
+      // cprintf("acquired lock\n");
       p->state = RUNNING;
 
       // cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
@@ -502,6 +520,7 @@ sched_stride(void)
       swtch(&(c->scheduler), p->context);
       // acquire(&ptable.lock);
       cprintf("got back from PID: %d, entry_flag = %d\n", p->pid, entry_flag);
+      cprintf("is lock held? - %d\n", holding(&ptable.lock));
 
       p->last_interrupted = getticks();
       p->runtime += p->last_interrupted - p->last_scheduled;
@@ -511,12 +530,12 @@ sched_stride(void)
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
-      cprintf("releasing lock\n");
-      release(&ptable.lock);
+      // cprintf("releasing lock\n");
+      // release(&ptable.lock);
     }
-
-    // cprintf("releasing lock\n");
-    // release(&ptable.lock);
+    // }
+    cprintf("releasing lock\n");
+    release(&ptable.lock);
   }
 }
 
@@ -552,6 +571,7 @@ sched(void)
 {
   int intena;
   struct proc *p = myproc();
+  cprintf("sched() called from PID: %d\n", p->pid);
 
   if(!holding(&ptable.lock))
     panic("sched ptable.lock");
@@ -563,11 +583,7 @@ sched(void)
     panic("sched interruptible");
   intena = mycpu()->intena;
 
-  // if (stride_scheduler) {
-  //   p->last_interrupted = getticks();
-  //   p->runtime += p->last_interrupted - p->last_scheduled;
-  // }
-  // cprintf("process %s switching back to scheduler at %d ticks\n", p->name, getticks());
+  cprintf("PID: %d switching back to scheduler at %d ticks\n", p->pid, getticks());
   swtch(&p->context, mycpu()->scheduler);
   mycpu()->intena = intena;
 }
@@ -591,6 +607,7 @@ forkret(void)
 {
   static int first = 1;
   // Still holding ptable.lock from scheduler.
+  cprintf("new process PID: %d, name: %s releasing scheduler lock in forkret()\n", myproc()->pid, myproc()->name);
   release(&ptable.lock);
 
   if (first) {
@@ -611,7 +628,7 @@ void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
-  
+  cprintf("PId: %d, name: %s called spleep()\n", p->pid, p->name);
   if(p == 0)
     panic("sleep");
 
@@ -625,13 +642,17 @@ sleep(void *chan, struct spinlock *lk)
   // (wakeup runs with ptable.lock locked),
   // so it's okay to release lk.
   if(lk != &ptable.lock){  //DOC: sleeplock0
+    cprintf("sleep() previously has lock: %s\n", lk->name);
     acquire(&ptable.lock);  //DOC: sleeplock1
+    cprintf("sleep() acquired ptable lock\n");
     release(lk);
+    cprintf("sleep() released lock: %s\n", lk->name);
   }
   // Go to sleep.
   p->chan = chan;
   p->state = SLEEPING;
 
+  cprintf("sleep() called sched with ptable lock held\n");
   sched();
 
   // Tidy up.
@@ -639,8 +660,10 @@ sleep(void *chan, struct spinlock *lk)
 
   // Reacquire original lock.
   if(lk != &ptable.lock){  //DOC: sleeplock2
+    cprintf("sleep() resetting its locks as before sched\n");
     release(&ptable.lock);
     acquire(lk);
+    cprintf("resetting succesful\n");
   }
 }
 
@@ -662,8 +685,10 @@ void
 wakeup(void *chan)
 {
   acquire(&ptable.lock);
+  cprintf("PID: %d, name: %s, wakeup() acquired lock\n", myproc()->pid, myproc()->name);
   wakeup1(chan);
   release(&ptable.lock);
+  cprintf("PID: %d, name: %s, wakeup() released lock\n", myproc()->pid, myproc()->name);
 }
 
 // Kill the process with the given pid.
@@ -673,19 +698,21 @@ int
 kill(int pid)
 {
   struct proc *p;
-
   acquire(&ptable.lock);
+  cprintf("kill() acquired lock\n");
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid == pid){
       p->killed = 1;
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING)
         p->state = RUNNABLE;
+      cprintf("kill() released lock PID: %d, name: %s\n", p->pid, p->name);
       release(&ptable.lock);
       return 0;
     }
   }
   release(&ptable.lock);
+  cprintf("kill() released lock\n");
   return -1;
 }
 

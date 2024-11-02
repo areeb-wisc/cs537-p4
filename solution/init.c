@@ -10,6 +10,7 @@ char *argv[] = { "sh", 0 };
 int
 main(void)
 {
+  printf(1, "Entered init!!\n");
   int pid, wpid;
 
   if(open("console", O_RDWR) < 0){
@@ -21,12 +22,14 @@ main(void)
 
   for(;;){
     printf(1, "init: starting sh\n");
+    printf(1, "init forking\n");
     pid = fork();
     if(pid < 0){
       printf(1, "init: fork failed\n");
       exit();
     }
     if(pid == 0){
+      printf(1, "child of init, exec into sh\n");
       exec("sh", argv);
       printf(1, "init: exec sh failed\n");
       exit();
