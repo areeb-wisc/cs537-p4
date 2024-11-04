@@ -8,7 +8,6 @@
 
 .globl swtch
 swtch:
-  # inc entry_flag
   movl 4(%esp), %eax
   movl 8(%esp), %edx
 
@@ -19,9 +18,7 @@ swtch:
   pushl %edi
 
   # Switch stacks
-  # inc entry_flag
   movl %esp, (%eax)
-  # inc entry_flag
   movl %edx, %esp
 
   # Load new callee-saved registers
@@ -29,5 +26,4 @@ swtch:
   popl %esi
   popl %ebx
   popl %ebp
-  # inc entry_flag
   ret

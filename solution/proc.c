@@ -379,8 +379,8 @@ sched_RR(void)
 
   for(;;) {
     // Enable interrupts on this processor.
-    // cprintf("enbaling interrupts\n");
-    // sti();
+    cprintf("enbaling interrupts\n");
+    sti();
 
     // Loop over process table looking for process to run.
     cprintf("trying to acquire lock\n");
@@ -477,7 +477,7 @@ sched_stride(void)
   for(;;) {
     cprintf("---------SCHEDULER LOOP -------------\n");
     // Enable interrupts on this processor.
-    // sti();
+    sti();
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
@@ -687,10 +687,10 @@ void
 wakeup(void *chan)
 {
   acquire(&ptable.lock);
-  cprintf("PID: %d, name: %s, wakeup() acquired lock\n", myproc()->pid, myproc()->name);
+  // cprintf("PID: %d, name: %s, wakeup() acquired lock\n", myproc()->pid, myproc()->name);
   wakeup1(chan);
   release(&ptable.lock);
-  cprintf("PID: %d, name: %s, wakeup() released lock\n", myproc()->pid, myproc()->name);
+  // cprintf("PID: %d, name: %s, wakeup() released lock\n", myproc()->pid, myproc()->name);
 }
 
 // Kill the process with the given pid.

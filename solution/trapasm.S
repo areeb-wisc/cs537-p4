@@ -29,5 +29,4 @@ trapret:
   popl %es
   popl %ds
   addl $0x8, %esp  # trapno and errcode
-  # inc entry_flag
   iret
