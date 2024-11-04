@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "pstat.h"
 
 int global_tickets = 0;
 int global_pass = 0;
@@ -102,18 +103,38 @@ global_pass_update(void) {
 
 void
 process_join(struct proc* p) {
-  // cprintf("PID: %d name: %s joining with tickets: %d\n", p->pid, p->name, p->tickets);
+  cprintf("process_join\n");
+  cprintf("PID: %d name: %s joining with tickets: %d\n", p->pid, p->name, p->tickets);
   global_pass_update();
+
+  int previously_holding = holding(&ptable.lock);
+  if (!previously_holding)
+    acquire(&ptable.lock);
+
   p->pass = global_pass + p->remain;
   global_tickets_update(p->tickets);
+
+  if (!previously_holding)
+    release(&ptable.lock);
 }
 
 void process_leave(struct proc* p) {
-  // cprintf("PID: %d name: %s leaving with tickets: %d\n", p->pid, p->name, p->tickets);
+  
+  cprintf("process_leave\n");
+  cprintf("PID: %d name: %s leaving with tickets: %d\n", p->pid, p->name, p->tickets);
   global_pass_update();
+
+  int previously_holding = holding(&ptable.lock);
+  if (!previously_holding)
+    acquire(&ptable.lock);
+
   p->remain = p->pass - global_pass;
-  // cprintf("p->remain: %d\n", p->remain);
   global_tickets_update(-1*(p->tickets));
+  
+  if (!previously_holding)
+    release(&ptable.lock);
+
+  // cprintf("p->remain: %d\n", p->remain);
   return;
 }
 
@@ -121,6 +142,10 @@ void
 set_tickets(struct proc* p, int newtickets) {
 
   int oldtickets = p->tickets;
+  int previously_holding = holding(&ptable.lock);
+  if (!previously_holding)
+    acquire(&ptable.lock);
+
   process_leave(p);
 
   int newstride = STRIDE1/newtickets;
@@ -131,7 +156,46 @@ set_tickets(struct proc* p, int newtickets) {
   p->remain = newremain;
 
   process_join(p);
+
+  if (!previously_holding)
+    release(&ptable.lock);
+
   cprintf("PID: %d name: %s oldtickets: %d newtickets: %d\n", p->pid, p->name, oldtickets, newtickets);
+}
+
+int
+get_pinfo(struct pstat* data)
+{
+  cprintf("get_pinfo()\n");
+
+  acquire(&ptable.lock);
+  for (int i = 0; i < NPROC; i++) {
+    struct proc p = ptable.proc[i];
+    data->inuse[i] = p.state == RUNNABLE;
+    data->tickets[i] = p.tickets;
+    data->pid[i] = p.pid;
+    data->pass[i] = p.pass;
+    data->remain[i] = p.remain;
+    data->stride[i] = p.stride;
+    data->rtime[i] = p.runtime;
+  }
+  release(&ptable.lock);
+
+  return 0;
+
+}
+
+void
+print_stats() {
+  cprintf("pinfo:\n");
+  struct pstat data;
+  get_pinfo(&data);
+  cprintf("Inuse\tPID\tTickets\tPass\tStride\tRuntime\n");
+  for (int i = 0; i < NPROC; i++) {
+    if (data.tickets[i] > 0)
+      cprintf("%d\t%d\t%d\t%d\t%d\t%d\n", data.inuse[i], data.pid[i], data.tickets[i], data.pass[i], data.stride[i], data.rtime[i]);
+  }
+  cprintf("\n");
 }
 
 //PAGEBREAK: 32
@@ -190,7 +254,7 @@ found:
     p->stride = STRIDE1/p->tickets;
     p->pass = 0;
     p->remain = p->stride;
-    cprintf("before joining PID: %d, name: %s | tickets: %d\n", p->pid, p->name, p->tickets);
+    // cprintf("before joining PID: %d, name: %s | tickets: %d\n", p->pid, p->name, p->tickets);
     process_join(p);
   }
 
@@ -527,10 +591,12 @@ sched_stride(void) {
       switchuvm(p);
       p->state = RUNNING;
 
-      // cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
+      cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
       p->last_scheduled = getticks();
       swtch(&(c->scheduler), p->context);
       switchkvm();
+      cprintf("returned from PID: %d name: %s\n", p->pid, p->name);
+      cprintf("Is lock held: %d\n", holding(&ptable.lock));
 
       int elapsed = p->last_interrupted - p->last_scheduled;
       p->runtime += elapsed;

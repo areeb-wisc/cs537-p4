@@ -13,8 +13,4 @@ struct pstat {
   int rtime[NPROC];      // Total running time of each process
 };
 
-int getpinfo(struct pstat* a) {
-    return 0;
-}
-
 #endif
