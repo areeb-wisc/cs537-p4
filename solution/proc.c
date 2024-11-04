@@ -84,9 +84,12 @@ getticks(void)
 void
 global_tickets_update(int delta) {
   global_tickets += delta;
+  // cprintf("delta: %d\n", delta);
   // cprintf("global_tickets: %d\n", global_tickets);
-  return;
-  global_stride = STRIDE1/global_tickets;
+  if (global_tickets == 0)
+    global_stride = 0;
+  else
+    global_stride = STRIDE1/global_tickets;
 }
 
 void
@@ -94,20 +97,20 @@ global_pass_update(void) {
   int elapsed = getticks() - last_global_pass_update;
   last_global_pass_update += elapsed;
   global_pass += (global_stride * elapsed);
+  // cprintf("global pass: %d\n", global_pass);
 }
 
 void
 process_join(struct proc* p) {
-  cprintf("PID: %d joining\n", p->pid);
+  // cprintf("PID: %d name: %s joining with tickets: %d\n", p->pid, p->name, p->tickets);
   global_pass_update();
   p->pass = global_pass + p->remain;
   global_tickets_update(p->tickets);
 }
 
 void process_leave(struct proc* p) {
-  cprintf("PID: %d leaving\n", p->pid);
+  // cprintf("PID: %d name: %s leaving with tickets: %d\n", p->pid, p->name, p->tickets);
   global_pass_update();
-  // cprintf("global pass: %d\n", global_pass);
   p->remain = p->pass - global_pass;
   // cprintf("p->remain: %d\n", p->remain);
   global_tickets_update(-1*(p->tickets));
@@ -115,8 +118,9 @@ void process_leave(struct proc* p) {
 }
 
 void
-process_modify(struct proc* p, int newtickets) {
+set_tickets(struct proc* p, int newtickets) {
 
+  int oldtickets = p->tickets;
   process_leave(p);
 
   int newstride = STRIDE1/newtickets;
@@ -127,6 +131,7 @@ process_modify(struct proc* p, int newtickets) {
   p->remain = newremain;
 
   process_join(p);
+  cprintf("PID: %d name: %s oldtickets: %d newtickets: %d\n", p->pid, p->name, oldtickets, newtickets);
 }
 
 //PAGEBREAK: 32
@@ -185,6 +190,7 @@ found:
     p->stride = STRIDE1/p->tickets;
     p->pass = 0;
     p->remain = p->stride;
+    cprintf("before joining PID: %d, name: %s | tickets: %d\n", p->pid, p->name, p->tickets);
     process_join(p);
   }
 
@@ -580,7 +586,7 @@ sched(void)
   intena = mycpu()->intena;
 
   p->last_interrupted = getticks();
-  cprintf("switching from PID: %d\n", p->pid);
+  // cprintf("switching from PID: %d\n", p->pid);
   swtch(&p->context, mycpu()->scheduler);
   mycpu()->intena = intena;
 }
@@ -646,7 +652,7 @@ sleep(void *chan, struct spinlock *lk)
   p->chan = chan;
   p->state = SLEEPING;
 
-  cprintf("PID: %d sleeping\n", p->pid);
+  // cprintf("PID: %d sleeping\n", p->pid);
   if (stride_scheduler)
     process_leave(p);
 

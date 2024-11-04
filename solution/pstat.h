@@ -17,8 +17,4 @@ int getpinfo(struct pstat* a) {
     return 0;
 }
 
-int settickets(int n) {
-    return 0;
-}
-
 #endif

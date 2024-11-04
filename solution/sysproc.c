@@ -89,3 +89,26 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+int
+sys_settickets(void)
+{
+  cprintf("sys_settickets()\n");
+
+  if (!stride_scheduler)
+    return -1;
+
+  int tickets;
+  if (argint(0, &tickets) < 0)
+    return -1;
+  
+  if (tickets > TICKETS_MAX)
+    return -1;
+  
+  if (tickets < 1)
+    tickets = TICKETS_INIT;
+  
+  set_tickets(myproc(), tickets);
+
+  return 0;
+}
