@@ -112,6 +112,17 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
+  p->last_scheduled = 0;
+  p->last_interrupted = 0;
+  p->runtime = 0;
+
+  if (stride_scheduler) {
+    p->tickets = TICKETS_INIT;
+    p->stride = STRIDE1/p->tickets;
+    p->pass = 0;
+    p->remain = p->stride;
+  }
+
   return p;
 }
 
@@ -211,13 +222,6 @@ fork(void)
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
   pid = np->pid;
-
-  if (stride_scheduler) {
-    np->tickets = TICKETS_INIT;
-    np->stride = STRIDE1/np->tickets;
-    np->pass = 0;
-    np->remain = np->stride;
-  }
 
   acquire(&ptable.lock);
 
@@ -363,6 +367,7 @@ int push(minheap* h, struct proc* p) {
         swap(&h->arr[idx],&h->arr[parent(idx)]);
         idx = parent(idx);
     }
+    // cprintf("address in heap = %p\n", &h->arr[idx]);
     h->size++;
     return 0;
 }
@@ -402,47 +407,11 @@ sched_roundrobin(void) {
       switchuvm(p);
       p->state = RUNNING;
       
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
-
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
-    }
-    release(&ptable.lock);
-  }
-}
-
-void
-sched_stride_working(void) {
-
-  cprintf("Running stride scheduler\n");
-  struct proc *p;
-  struct cpu *c = mycpu();
-  c->proc = 0;
-
-  for(;;) {
-    // Enable interrupts on this processor.
-    sti();
-
-    // Loop over process table looking for process to run.
-    acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
-
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
-
-      // cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
       p->last_scheduled = getticks();
-      
       swtch(&(c->scheduler), p->context);
       switchkvm();
+
+      p->runtime += (p->last_interrupted - p->last_scheduled);
 
       // Process is done running for now.
       // It should have changed its p->state before coming back.
@@ -464,19 +433,25 @@ sched_stride(void) {
     // Enable interrupts on this processor.
     sti();
 
-    // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    int count = NPROC;
-    while (count--) {
 
-      minheap heap;
-      heap.size = 0;
-
-      for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-        if(p->state == RUNNABLE)
-          push(&heap, p);
+    // find process with min pass, min rtime, min pid
+    minheap heap;
+    heap.size = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+      if(p->state == RUNNABLE) {
+        push(&heap, p);
       }
+    }
 
+    if (heap.size > 0) {
+
+      struct proc* minproc = getmin(&heap);
+      for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+        if (p->pid == minproc->pid)
+          break;
+      }
+      cprintf("chosen PID: %d | name: %s | pass: %d | rtime: %d\n", p->pid, p->name, p->pass, p->runtime);
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
@@ -486,9 +461,12 @@ sched_stride(void) {
 
       // cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
       p->last_scheduled = getticks();
-      
       swtch(&(c->scheduler), p->context);
       switchkvm();
+
+      int elapsed = p->last_interrupted - p->last_scheduled;
+      p->runtime += elapsed;
+      p->pass += (elapsed * p->stride);
 
       // Process is done running for now.
       // It should have changed its p->state before coming back.
@@ -538,11 +516,11 @@ sched(void)
   if(readeflags()&FL_IF)
     panic("sched interruptible");
   intena = mycpu()->intena;
+
   if (stride_scheduler) {
     p->last_interrupted = getticks();
-    p->runtime += p->last_interrupted - p->last_scheduled;
   }
-  // cprintf("process %s switching back to scheduler at %d ticks\n", p->name, getticks());
+
   swtch(&p->context, mycpu()->scheduler);
   mycpu()->intena = intena;
 }
