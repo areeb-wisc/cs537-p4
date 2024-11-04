@@ -7,6 +7,11 @@
 #include "proc.h"
 #include "spinlock.h"
 
+int global_tickets = 0;
+int global_pass = 0;
+int global_stride = 0;
+int last_global_pass_update = 0;
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -65,6 +70,65 @@ myproc(void) {
   return p;
 }
 
+int
+getticks(void)
+{
+  uint xticks;
+
+  acquire(&tickslock);
+  xticks = ticks;
+  release(&tickslock);
+  return xticks;
+}
+
+void
+global_tickets_update(int delta) {
+  global_tickets += delta;
+  // cprintf("global_tickets: %d\n", global_tickets);
+  return;
+  global_stride = STRIDE1/global_tickets;
+}
+
+void
+global_pass_update(void) {
+  int elapsed = getticks() - last_global_pass_update;
+  last_global_pass_update += elapsed;
+  global_pass += (global_stride * elapsed);
+}
+
+void
+process_join(struct proc* p) {
+  cprintf("PID: %d joining\n", p->pid);
+  global_pass_update();
+  p->pass = global_pass + p->remain;
+  global_tickets_update(p->tickets);
+}
+
+void process_leave(struct proc* p) {
+  cprintf("PID: %d leaving\n", p->pid);
+  global_pass_update();
+  // cprintf("global pass: %d\n", global_pass);
+  p->remain = p->pass - global_pass;
+  // cprintf("p->remain: %d\n", p->remain);
+  global_tickets_update(-1*(p->tickets));
+  return;
+}
+
+void
+process_modify(struct proc* p, int newtickets) {
+
+  process_leave(p);
+
+  int newstride = STRIDE1/newtickets;
+  int newremain = (p->remain * newstride) / p->stride;
+
+  p->tickets = newtickets;
+  p->stride = newstride;
+  p->remain = newremain;
+
+  process_join(p);
+}
+
 //PAGEBREAK: 32
 // Look in the process table for an UNUSED proc.
 // If found, change state to EMBRYO and initialize
@@ -121,6 +185,7 @@ found:
     p->stride = STRIDE1/p->tickets;
     p->pass = 0;
     p->remain = p->stride;
+    process_join(p);
   }
 
   return p;
@@ -191,6 +256,7 @@ growproc(int n)
 int
 fork(void)
 {
+  cprintf("fork()\n");
   int i, pid;
   struct proc *np;
   struct proc *curproc = myproc();
@@ -199,7 +265,7 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
-
+  cprintf("allocproc() success\n");
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
     kfree(np->kstack);
@@ -274,6 +340,10 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
+
+  if (stride_scheduler)
+    process_leave(curproc);
+
   sched();
   panic("zombie exit");
 }
@@ -320,17 +390,6 @@ wait(void)
     // Wait for children to exit.  (See wakeup1 call in proc_exit.)
     sleep(curproc, &ptable.lock);  //DOC: wait-sleep
   }
-}
-
-int
-getticks(void)
-{
-  uint xticks;
-
-  acquire(&tickslock);
-  xticks = ticks;
-  release(&tickslock);
-  return xticks;
 }
 
 // ----------------------STRIDE SCHEDULER HELPERS START -----------------------------
@@ -428,7 +487,7 @@ sched_stride(void) {
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-
+  struct proc* prev = 0;
   for(;;) {
     // Enable interrupts on this processor.
     sti();
@@ -451,7 +510,10 @@ sched_stride(void) {
         if (p->pid == minproc->pid)
           break;
       }
-      cprintf("chosen PID: %d | name: %s | pass: %d | rtime: %d\n", p->pid, p->name, p->pass, p->runtime);
+      if (p != prev) {
+        // cprintf("chosen PID: %d | name: %s | stride: %d | pass: %d | rtime: %d\n", p->pid, p->name, p->stride, p->pass, p->runtime);
+        prev = p;
+      }
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
@@ -517,10 +579,8 @@ sched(void)
     panic("sched interruptible");
   intena = mycpu()->intena;
 
-  if (stride_scheduler) {
-    p->last_interrupted = getticks();
-  }
-
+  p->last_interrupted = getticks();
+  cprintf("switching from PID: %d\n", p->pid);
   swtch(&p->context, mycpu()->scheduler);
   mycpu()->intena = intena;
 }
@@ -530,7 +590,10 @@ void
 yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
-  myproc()->state = RUNNABLE;
+  struct proc* p = myproc();
+  
+  p->state = RUNNABLE;
+
   sched();
   release(&ptable.lock);
 }
@@ -583,6 +646,10 @@ sleep(void *chan, struct spinlock *lk)
   p->chan = chan;
   p->state = SLEEPING;
 
+  cprintf("PID: %d sleeping\n", p->pid);
+  if (stride_scheduler)
+    process_leave(p);
+
   sched();
 
   // Tidy up.
@@ -603,9 +670,14 @@ wakeup1(void *chan)
 {
   struct proc *p;
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->state == SLEEPING && p->chan == chan) {
       p->state = RUNNABLE;
+      if (stride_scheduler)
+        process_join(p);
+    }
+  }
+
 }
 
 // Wake up all processes sleeping on chan.
@@ -632,6 +704,8 @@ kill(int pid)
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING)
         p->state = RUNNABLE;
+      if (stride_scheduler)
+        process_leave(p);
       release(&ptable.lock);
       return 0;
     }

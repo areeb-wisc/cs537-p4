@@ -83,7 +83,9 @@ int main() {
 
   int start_time = uptime();
   // Allow initial processes to run for a while
+  printf(1, "sleep(100)\n");
   sleep(100);
+  printf(1, "returned from sleep\n");
 
   measure(20, start_time, fd);
 

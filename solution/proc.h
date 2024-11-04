@@ -15,6 +15,7 @@ extern int ncpu;
 extern int global_tickets;
 extern int global_stride;
 extern int global_pass;
+extern int last_global_pass_update;
 extern int stride_scheduler;
 
 //PAGEBREAK: 17
