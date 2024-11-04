@@ -329,6 +329,48 @@ getticks(void)
   return xticks;
 }
 
+// ----------------------STRIDE SCHEDULER HELPERS START -----------------------------
+typedef struct _minheap {
+    struct proc arr[NPROC];
+    int size;
+} minheap;
+int parent(int idx) {
+    return (idx - 1)/2;
+}
+int compare(struct proc* p1, struct proc* p2) {
+    if (p1->pass != p2->pass)
+        return p1->pass < p2->pass ? -1 : 1;
+    if (p1->runtime != p2->runtime)
+        return p1->runtime < p2->runtime ? -1 : 1;
+    if (p1->pid != p2->pid)
+        return p1->pid < p2->pid ? -1 : 1;
+    return 0;
+}
+int greater(struct proc* p1, struct proc* p2) {
+    return compare(p1,p2) > 0;
+}
+void swap(struct proc* p1, struct proc* p2) {
+    struct proc temp = *p1;
+    *p1 = *p2;
+    *p2 = temp;
+}
+int push(minheap* h, struct proc* p) {
+    if (h->size == NPROC)
+        return -1;
+    int idx = h->size;
+    h->arr[idx] = *p;
+    while (idx != 0 && greater(&h->arr[parent(idx)],&h->arr[idx])) {
+        swap(&h->arr[idx],&h->arr[parent(idx)]);
+        idx = parent(idx);
+    }
+    h->size++;
+    return 0;
+}
+struct proc* getmin(minheap* h) {
+    return &h->arr[0];
+}
+// ----------------------STRIDE SCHEDULER HELPERS END -----------------------------
+
 #ifdef STRIDE
 int stride_scheduler = 1;
 #elif RR
@@ -372,7 +414,7 @@ sched_roundrobin(void) {
 }
 
 void
-sched_stride(void) {
+sched_stride_working(void) {
 
   cprintf("Running stride scheduler\n");
   struct proc *p;
@@ -410,6 +452,51 @@ sched_stride(void) {
   }
 }
 
+void
+sched_stride(void) {
+
+  cprintf("Running stride scheduler\n");
+  struct proc *p;
+  struct cpu *c = mycpu();
+  c->proc = 0;
+
+  for(;;) {
+    // Enable interrupts on this processor.
+    sti();
+
+    // Loop over process table looking for process to run.
+    acquire(&ptable.lock);
+    int count = NPROC;
+    while (count--) {
+
+      minheap heap;
+      heap.size = 0;
+
+      for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+        if(p->state == RUNNABLE)
+          push(&heap, p);
+      }
+
+      // Switch to chosen process.  It is the process's job
+      // to release ptable.lock and then reacquire it
+      // before jumping back to us.
+      c->proc = p;
+      switchuvm(p);
+      p->state = RUNNING;
+
+      // cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
+      p->last_scheduled = getticks();
+      
+      swtch(&(c->scheduler), p->context);
+      switchkvm();
+
+      // Process is done running for now.
+      // It should have changed its p->state before coming back.
+      c->proc = 0;
+    }
+    release(&ptable.lock);
+  }
+}
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
