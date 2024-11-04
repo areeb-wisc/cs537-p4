@@ -408,11 +408,11 @@ exit(void)
     }
   }
 
-  // Jump into the scheduler, never to return.
-  curproc->state = ZOMBIE;
-
   if (stride_scheduler)
     process_leave(curproc);
+
+  // Jump into the scheduler, never to return.
+  curproc->state = ZOMBIE;
 
   sched();
   panic("zombie exit");
@@ -716,11 +716,11 @@ sleep(void *chan, struct spinlock *lk)
   }
   // Go to sleep.
   p->chan = chan;
-  p->state = SLEEPING;
-
   // cprintf("PID: %d sleeping\n", p->pid);
   if (stride_scheduler)
     process_leave(p);
+
+  p->state = SLEEPING;
 
   sched();
 
@@ -744,9 +744,9 @@ wakeup1(void *chan)
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
     if(p->state == SLEEPING && p->chan == chan) {
-      p->state = RUNNABLE;
       if (stride_scheduler)
         process_join(p);
+      p->state = RUNNABLE;
     }
   }
 
@@ -774,10 +774,11 @@ kill(int pid)
     if(p->pid == pid){
       p->killed = 1;
       // Wake process from sleep if necessary.
-      if(p->state == SLEEPING)
+      if(p->state == SLEEPING) {
+        if (stride_scheduler)
+          process_leave(p);
         p->state = RUNNABLE;
-      if (stride_scheduler)
-        process_leave(p);
+      }
       release(&ptable.lock);
       return 0;
     }
