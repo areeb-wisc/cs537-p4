@@ -8,7 +8,7 @@
 #define ADDITIONAL_PROCESSES 6
 #define TOTAL_PROCESSES (INITIAL_PROCESSES+ADDITIONAL_PROCESSES)
 // #define WORKLOAD_TIME 100000000
-#define WORKLOAD_TIME 10
+#define WORKLOAD_TIME 1000
 
 #define CSVHEADER "Time,PID,Tickets,Pass,Stride,Runtime\n"
 #define MAX_INT_STR_LENGTH 12   // Max length for integer string representation
@@ -70,7 +70,7 @@ int main() {
   // Assign different tickets for the additional processesNPROC
   ticket_values[INITIAL_PROCESSES] = 128;
   for (i = INITIAL_PROCESSES + 1; i < TOTAL_PROCESSES; i++) {
-    ticket_values[i] = ticket_values[i - 1] / 4; // Tickets: 32, 8, 2, 0, 0, 0
+    ticket_values[i] = ticket_values[i - 1] / 4; // Tickets: 32, 8, 2, 8, 8, 8
   }
 
   // final tickets are:
@@ -95,27 +95,27 @@ int main() {
     }
   }
 
-  printf(1,"debug sleep\n");
-  sleep(100);
-  struct pstat* p1 = (struct pstat*)malloc(sizeof(struct pstat));
-  int ret = getpinfo(p1);
-  printf(1, "ret = %d\n", ret);
-  printf(1, "Inuse\tPID\tTickets\tPass\tStride\tRuntime\n");
-  for (int ii = 0; ii < NPROC; ii++) {
-      printf(1, "%d\t%d\t%d\t%d\t%d\t%d\n",
-        p1->inuse[ii],
-        p1->pid[ii],
-        p1->tickets[ii],
-        p1->pass[ii],
-        p1->stride[ii],
-        p1->rtime[ii]);
-  }
+  // printf(1,"debug sleep\n");
+  // sleep(100);
+  // struct pstat* p1 = (struct pstat*)malloc(sizeof(struct pstat));
+  // int ret = getpinfo(p1);
+  // printf(1, "ret = %d\n", ret);
+  // printf(1, "Inuse\tPID\tTickets\tPass\tStride\tRuntime\n");
+  // for (int ii = 0; ii < NPROC; ii++) {
+  //     printf(1, "%d\t%d\t%d\t%d\t%d\t%d\n",
+  //       p1->inuse[ii],
+  //       p1->pid[ii],
+  //       p1->tickets[ii],
+  //       p1->pass[ii],
+  //       p1->stride[ii],
+  //       p1->rtime[ii]);
+  // }
 
   int start_time = uptime();
   // Allow initial processes to run for a while
-  printf(1, "sleep(100)\n");
+  // printf(1, "sleep(100)\n");
   sleep(100);
-  printf(1, "returned from sleep\n");
+  // printf(1, "returned from sleep\n");
 
   measure(20, start_time, fd);
 

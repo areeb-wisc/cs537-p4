@@ -136,8 +136,8 @@ void process_leave(struct proc* p) {
 void
 set_tickets(struct proc* p, int newtickets) {
 
-  cprintf("set_tickets(%d)\n", newtickets);
-  int oldtickets = p->tickets;
+  // cprintf("set_tickets(%d)\n", newtickets);
+  // int oldtickets = p->tickets;
 
   int previously_holding = holding(&ptable.lock);
   if (!previously_holding)
@@ -157,18 +157,18 @@ set_tickets(struct proc* p, int newtickets) {
   if (!previously_holding)
     release(&ptable.lock);
 
-  cprintf("PID: %d name: %s oldtickets: %d newtickets: %d\n", p->pid, p->name, oldtickets, newtickets);
+  // cprintf("PID: %d name: %s oldtickets: %d newtickets: %d\n", p->pid, p->name, oldtickets, newtickets);
 }
 
 int
 get_pinfo(struct pstat* data)
 {
-  cprintf("get_pinfo()\n");
+  // cprintf("get_pinfo()\n");
 
   acquire(&ptable.lock);
   for (int i = 0; i < NPROC; i++) {
     struct proc p = ptable.proc[i];
-    data->inuse[i] = p.state != UNUSED;
+    data->inuse[i] = (p.state == EMBRYO || p.state == SLEEPING || p.state == RUNNABLE || p.state == RUNNING || p.state == ZOMBIE);
     data->tickets[i] = p.tickets;
     data->pid[i] = p.pid;
     data->pass[i] = p.pass;
@@ -177,6 +177,11 @@ get_pinfo(struct pstat* data)
     data->rtime[i] = p.runtime;
   }
   release(&ptable.lock);
+
+  // cprintf("Inuse\tPID\tTickets\tPass\tStride\tRuntime\n");
+  // for (int i = 0; i < NPROC; i++)
+  //     cprintf("%d\t%d\t%d\t%d\t%d\t%d\n", data->inuse[i], data->pid[i], data->tickets[i], data->pass[i], data->stride[i], data->rtime[i]);
+  // cprintf("\n");
 
   return 0;
 
@@ -206,14 +211,14 @@ allocproc(void)
   struct proc *p;
   char *sp;
 
-  cprintf("allocproc acquiring lock\n");
+  // cprintf("allocproc acquiring lock\n");
   acquire(&ptable.lock);
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
       goto found;
 
-  cprintf("allocproc released lock\n");
+  // cprintf("allocproc released lock\n");
   release(&ptable.lock);
   return 0;
 
@@ -230,11 +235,9 @@ found:
     p->stride = STRIDE1/p->tickets;
     p->pass = 0;
     p->remain = p->stride;
-    // cprintf("before joining PID: %d, name: %s | tickets: %d\n", p->pid, p->name, p->tickets);
-    process_join(p);
   }
 
-  cprintf("allocproc released lock\n");
+  // cprintf("allocproc released lock\n");
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -294,6 +297,9 @@ userinit(void)
   // because the assignment might not be atomic.
   acquire(&ptable.lock);
 
+  if (stride_scheduler)
+    process_join(p);
+
   p->state = RUNNABLE;
 
   release(&ptable.lock);
@@ -326,7 +332,7 @@ growproc(int n)
 int
 fork(void)
 {
-  cprintf("fork()\n");
+  // cprintf("fork()\n");
   int i, pid;
   struct proc *np;
   struct proc *curproc = myproc();
@@ -335,16 +341,11 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
-  cprintf("allocproc() success\n");
+  // cprintf("allocproc() success\n");
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
     kfree(np->kstack);
     np->kstack = 0;
-    if (stride_scheduler) {
-        acquire(&ptable.lock);
-        process_leave(np);
-        release(&ptable.lock);
-    }
     np->state = UNUSED;
     return -1;
   }
@@ -365,6 +366,9 @@ fork(void)
   pid = np->pid;
 
   acquire(&ptable.lock);
+
+  if (stride_scheduler)
+    process_join(np);
 
   np->state = RUNNABLE;
 
@@ -774,7 +778,7 @@ wakeup(void *chan)
 int
 kill(int pid)
 {
-  cprintf("kill()\n");
+  // cprintf("kill()\n");
   struct proc *p;
 
   acquire(&ptable.lock);
