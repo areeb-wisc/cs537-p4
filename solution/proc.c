@@ -8,6 +8,12 @@
 #include "spinlock.h"
 #include "pstat.h"
 
+#ifdef STRIDE
+int stride_scheduler = 1;
+#elif RR
+int stride_scheduler = 0;
+#endif
+
 uint global_tickets = 0;
 uint global_pass = 0;
 uint global_stride = 0;
@@ -75,19 +81,13 @@ uint
 getticks(void)
 {
   uint xticks;
-  // cprintf("acquiring ticklock\n");
-//  acquire(&tickslock);
   xticks = ticks;
-  // release(&tickslock);
-  // cprintf("released ticklock\n");
   return xticks;
 }
 
 void
 global_tickets_update(int delta) {
   global_tickets += delta;
-  // cprintf("delta: %d\n", delta);
-  // cprintf("global_tickets: %d\n", global_tickets);
   if (global_tickets == 0)
     global_stride = 0;
   else
@@ -99,86 +99,42 @@ global_pass_update(void) {
   uint elapsed = getticks() - last_global_pass_update;
   last_global_pass_update += elapsed;
   global_pass += (global_stride * elapsed);
-  // cprintf("global pass: %d\n", global_pass);
 }
-
 
 // Only called when caller holds ptable lock
 void
 process_join(struct proc* p) {
-  // cprintf("process_join\n");
-  // cprintf("PID: %d name: %s joining with tickets: %d\n", p->pid, p->name, p->tickets);
   global_pass_update();
   p->pass = global_pass + p->remain;
   global_tickets_update(p->tickets);
 }
 
 void process_leave(struct proc* p) {
-  
-  // cprintf("process_leave\n");
-  // cprintf("PID: %d name: %s leaving with tickets: %d\n", p->pid, p->name, p->tickets);
-
-  // int previously_holding = holding(&ptable.lock);
-  // if (!previously_holding)
-  //   acquire(&ptable.lock);
-
   global_pass_update();
   p->remain = p->pass - global_pass;
   global_tickets_update(-p->tickets);
-  
-  // if (!previously_holding)
-  //   release(&ptable.lock);
-
-  // cprintf("p->remain: %d\n", p->remain);
-  return;
 }
 
 void
 set_tickets(struct proc* p, int newtickets) {
-
-  // cprintf("set_tickets(%d)\n", newtickets);
-  // int oldtickets = p->tickets;
-
-  int previously_holding = holding(&ptable.lock);
-  if (!previously_holding)
-    acquire(&ptable.lock);
-
+  acquire(&ptable.lock);
   process_leave(p);
-
   uint newstride = STRIDE1/newtickets;
   uint newremain = (p->remain * newstride) / p->stride;
-
   p->tickets = newtickets;
   p->stride = newstride;
   p->remain = newremain;
-
   process_join(p);
-
-  if (!previously_holding)
-    release(&ptable.lock);
-
-  // cprintf("PID: %d name: %s oldtickets: %d newtickets: %d\n", p->pid, p->name, oldtickets, newtickets);
+  release(&ptable.lock);
 }
 
 int
 get_pinfo(struct pstat* data)
 {
-  // cprintf("get_pinfo()\n");
-  // char *states[] = {
-  //   [UNUSED]    "unused",
-  //   [EMBRYO]    "embryo",
-  //   [SLEEPING]  "sleep ",
-  //   [RUNNABLE]  "runble",
-  //   [RUNNING]   "run   ",
-  //   [ZOMBIE]    "zombie"
-  // };
-
   acquire(&ptable.lock);
   for (int i = 0; i < NPROC; i++) {
     struct proc p = ptable.proc[i];
     data->inuse[i] = (p.state == EMBRYO || p.state == RUNNABLE || p.state == RUNNING || p.state == ZOMBIE);
-    // cprintf("PID: %d | State: %s\n", p.pid, states[p.state]);
-    // data->inuse[i] = (p.state > 0 && p.state < NELEM(states) && states[p.state]);
     data->tickets[i] = p.tickets;
     data->pid[i] = p.pid;
     data->pass[i] = p.pass;
@@ -187,27 +143,7 @@ get_pinfo(struct pstat* data)
     data->rtime[i] = p.runtime;
   }
   release(&ptable.lock);
-
-  // cprintf("Inuse\tPID\tTickets\tPass\tStride\tRuntime\n");
-  // for (int i = 0; i < NPROC; i++)
-  //     cprintf("%d\t%d\t%d\t%d\t%d\t%d\n", data->inuse[i], data->pid[i], data->tickets[i], data->pass[i], data->stride[i], data->rtime[i]);
-  // cprintf("\n");
-
   return 0;
-
-}
-
-void
-print_stats() {
-  cprintf("pinfo:\n");
-  struct pstat data;
-  get_pinfo(&data);
-  cprintf("Inuse\tPID\tTickets\tPass\tStride\tRuntime\n");
-  for (int i = 0; i < NPROC; i++) {
-    if (data.tickets[i] > 0)
-      cprintf("%d\t%d\t%d\t%d\t%d\t%d\n", data.inuse[i], data.pid[i], data.tickets[i], data.pass[i], data.stride[i], data.rtime[i]);
-  }
-  cprintf("\n");
 }
 
 //PAGEBREAK: 32
@@ -221,14 +157,12 @@ allocproc(void)
   struct proc *p;
   char *sp;
 
-  // cprintf("allocproc acquiring lock\n");
   acquire(&ptable.lock);
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
       goto found;
 
-  // cprintf("allocproc released lock\n");
   release(&ptable.lock);
   return 0;
 
@@ -247,7 +181,6 @@ found:
     p->remain = p->stride;
   }
 
-  // cprintf("allocproc released lock\n");
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -342,7 +275,6 @@ growproc(int n)
 int
 fork(void)
 {
-  // cprintf("fork()\n");
   int i, pid;
   struct proc *np;
   struct proc *curproc = myproc();
@@ -351,7 +283,7 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
-  // cprintf("allocproc() success\n");
+
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
     kfree(np->kstack);
@@ -481,14 +413,8 @@ wait(void)
   }
 }
 
-// ----------------------STRIDE SCHEDULER HELPERS START -----------------------------
-typedef struct _minheap {
-    struct proc arr[NPROC];
-    int size;
-} minheap;
-int parent(int idx) {
-    return (idx - 1)/2;
-}
+// compare 2 processes p1 and p2
+// based on pass, then runtime, the pid
 int compare(struct proc* p1, struct proc* p2) {
     if (p1->pass != p2->pass)
         return p1->pass < p2->pass ? -1 : 1;
@@ -498,42 +424,10 @@ int compare(struct proc* p1, struct proc* p2) {
         return p1->pid < p2->pid ? -1 : 1;
     return 0;
 }
-int greater(struct proc* p1, struct proc* p2) {
-    return compare(p1,p2) > 0;
-}
-void swap(struct proc* p1, struct proc* p2) {
-    struct proc temp = *p1;
-    *p1 = *p2;
-    *p2 = temp;
-}
-int push(minheap* h, struct proc* p) {
-    if (h->size == NPROC)
-        return -1;
-    int idx = h->size;
-    h->arr[idx] = *p;
-    while (idx != 0 && greater(&h->arr[parent(idx)],&h->arr[idx])) {
-        swap(&h->arr[idx],&h->arr[parent(idx)]);
-        idx = parent(idx);
-    }
-    // cprintf("address in heap = %p\n", &h->arr[idx]);
-    h->size++;
-    return 0;
-}
-struct proc* getmin(minheap* h) {
-    return &h->arr[0];
-}
-// ----------------------STRIDE SCHEDULER HELPERS END -----------------------------
-
-#ifdef STRIDE
-int stride_scheduler = 1;
-#elif RR
-int stride_scheduler = 0;
-#endif
 
 void
-sched_roundrobin(void) {
+sched_RR(void) {
 
-  cprintf("running RR scheduler\n");
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
@@ -570,104 +464,30 @@ sched_roundrobin(void) {
 }
 
 void
-sched_stride_heap(void) {
-
-  cprintf("Running stride scheduler\n");
-  struct proc *p;
-  struct cpu *c = mycpu();
-  c->proc = 0;
-  struct proc* prev = 0;
-  for(;;) {
-    // Enable interrupts on this processor.
-    sti();
-
-    // cprintf("scheduler acquiring lock\n");
-    acquire(&ptable.lock);
-
-    // find process with min pass, min rtime, min pid
-    minheap heap;
-    heap.size = 0;
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-      if(p->state == RUNNABLE) {
-        push(&heap, p);
-      }
-    }
-
-    if (heap.size > 0) {
-
-      struct proc* minproc = getmin(&heap);
-      for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-        if (p->pid == minproc->pid)
-          break;
-      }
-      if (p != prev) {
-        // cprintf("chosen PID: %d | name: %s | tickets: %d | stride: %d | pass: %d | rtime: %d\n", p->pid, p->name, p->tickets, p->stride, p->pass, p->runtime);
-        prev = p;
-      }
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
-
-      // cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
-      p->last_scheduled = getticks();
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
-      // cprintf("returned from PID: %d name: %s\n", p->pid, p->name);
-      // cprintf("Is lock held: %d\n", holding(&ptable.lock));
-
-      // cprintf("calculating elapsed\n");
-      uint elapsed = p->last_interrupted - p->last_scheduled;
-      // cprintf("calculatinf runtime\n");
-      p->runtime += elapsed;
-      // cprintf("calculating pass\n");
-      p->pass += (elapsed * p->stride);
-      // cprintf("PID: %d elapsed: %d runtime: %d pass: %d\n", p->pid, elapsed, p->runtime, p->pass);
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
-    }
-    release(&ptable.lock);
-    // cprintf("scheduler released lock\n");
-  }
-}
-
-void
 sched_stride(void) {
 
-  cprintf("Running stride scheduler\n");
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  // struct proc* prev = 0;
+
   for(;;) {
+
     // Enable interrupts on this processor.
     sti();
 
-    // cprintf("scheduler acquiring lock\n");
     acquire(&ptable.lock);
 
     // find process with min pass, min rtime, min pid
-    // cprintf("selecting process\n");
     struct proc* minproc = 0;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
       if(p->state == RUNNABLE) {
-        if (minproc == 0 || compare(p, minproc) < 0) {
+        if (minproc == 0 || compare(p, minproc) < 0)
           minproc = p;
-          // cprintf("minproc PID: %d\n", p->pid);
-        }
       }
     }
 
-    // for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-    //   if(p->pid == minproc->pid)
-    //     break;
-    // }
     if (minproc != 0) {
       p = minproc;
-      // cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
@@ -678,22 +498,16 @@ sched_stride(void) {
       p->last_scheduled = getticks();
       swtch(&(c->scheduler), p->context);
       switchkvm();
-      // cprintf("returned from PID: %d name: %s\n", p->pid, p->name);
-      // cprintf("Is lock held: %d\n", holding(&ptable.lock));
 
-      // cprintf("calculating elapsed\n");
       uint elapsed = p->last_interrupted - p->last_scheduled;
-      // cprintf("calculatinf runtime\n");
       p->runtime += elapsed;
-      // cprintf("calculating pass\n");
       p->pass += (elapsed * p->stride);
-      // cprintf("PID: %d elapsed: %d runtime: %d pass: %d\n", p->pid, elapsed, p->runtime, p->pass);
+
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
     }
     release(&ptable.lock);
-    // cprintf("scheduler released lock\n");
   }
 }
 
@@ -712,7 +526,7 @@ scheduler(void)
     if (stride_scheduler)
       sched_stride();
     else
-      sched_roundrobin();
+      sched_RR();
   }
 }
 
@@ -740,7 +554,6 @@ sched(void)
   intena = mycpu()->intena;
 
   p->last_interrupted = getticks();
-  // cprintf("switching from PID: %d\n", p->pid);
   swtch(&p->context, mycpu()->scheduler);
   mycpu()->intena = intena;
 }
@@ -804,7 +617,7 @@ sleep(void *chan, struct spinlock *lk)
   }
   // Go to sleep.
   p->chan = chan;
-  // cprintf("PID: %d sleeping\n", p->pid);
+
   if (stride_scheduler)
     process_leave(p);
 
@@ -855,7 +668,6 @@ wakeup(void *chan)
 int
 kill(int pid)
 {
-  // cprintf("kill()\n");
   struct proc *p;
 
   acquire(&ptable.lock);

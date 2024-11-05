@@ -94,7 +94,6 @@ sys_uptime(void)
 int
 sys_settickets(void)
 {
-  // cprintf("sys_settickets()\n");
 
   if (!stride_scheduler)
     return -1;
@@ -115,8 +114,8 @@ sys_settickets(void)
 }
 
 int
-sys_getpinfo(void) {
-  // cprintf("sys_getpinfo()\n");
+sys_getpinfo(void)
+{
 
   struct pstat *ps;
   if (argptr(0, (void*)&ps, sizeof(*ps)) < 0)

@@ -8,7 +8,6 @@
 #define ADDITIONAL_PROCESSES 6
 #define TOTAL_PROCESSES (INITIAL_PROCESSES+ADDITIONAL_PROCESSES)
 #define WORKLOAD_TIME 100000000
-// #define WORKLOAD_TIME 10000
 
 #define CSVHEADER "Time,PID,Tickets,Pass,Stride,Runtime\n"
 #define MAX_INT_STR_LENGTH 12   // Max length for integer string representation
@@ -25,31 +24,6 @@ void itoa(int n, char* s);
 void write_csv_line(int fd, int current_time, int pid, int tickets, int pass, int stride, int runtime);
 
 int main() {
-
-  printf(1, "STARTING MAIN\n");
-  #ifdef RR
-  printf(1, "macro = RR\n");
-  #elif STRIDE
-  printf(1, "macro = STRIDE\n");
-  #else
-  printf(1, "error\n");
-  #endif
-
-  printf(1, "CSV_HEADER = %s\n", CSVHEADER);
-  // struct pstat* p1 = (struct pstat*)malloc(sizeof(struct pstat));
-  // int ret = getpinfo(p1);
-  // printf(1, "ret = %d\n", ret);
-  // printf(1, "Inuse\tPID\tTickets\tPass\tStride\tRuntime\n");
-  // for (int ii = 0; ii < NPROC; ii++) {
-  //     printf(1, "%d\t%d\t%d\t%d\t%d\t%d\n",
-  //       p1->inuse[ii],
-  //       p1->pid[ii],
-  //       p1->tickets[ii],
-  //       p1->pass[ii],
-  //       p1->stride[ii],
-  //       p1->rtime[ii]);
-  // }
-
 
   int i;
   int pid;
@@ -74,14 +48,6 @@ int main() {
     ticket_values[i] = ticket_values[i - 1] / 4; // Tickets: 32, 8, 2, 8, 8, 8
   }
 
-  // final tickets are:
-  // 0 1 2 3 4  5  6  7  8  9  10 11 12 13 14 15
-  // 1 2 4 8 16 32 32 32 32 32 32 32 8  2  8  8
-
-  printf(1,"tickets are:\n");
-  for (int i = 0; i < TOTAL_PROCESSES; i++)
-    printf(1,"%d : %d\n",i,ticket_values[i]);
-
   printf(1, "Starting initial %d processes.\n", INITIAL_PROCESSES);
   for (i = 0; i < INITIAL_PROCESSES; i++) {
     pid = fork();
@@ -96,27 +62,8 @@ int main() {
     }
   }
 
-  // printf(1,"debug sleep\n");
-  // sleep(100);
-  // struct pstat* p1 = (struct pstat*)malloc(sizeof(struct pstat));
-  // int ret = getpinfo(p1);
-  // printf(1, "ret = %d\n", ret);
-  // printf(1, "Inuse\tPID\tTickets\tPass\tStride\tRuntime\n");
-  // for (int ii = 0; ii < NPROC; ii++) {
-  //     printf(1, "%d\t%d\t%d\t%d\t%d\t%d\n",
-  //       p1->inuse[ii],
-  //       p1->pid[ii],
-  //       p1->tickets[ii],
-  //       p1->pass[ii],
-  //       p1->stride[ii],
-  //       p1->rtime[ii]);
-  // }
-
   int start_time = uptime();
-  // Allow initial processes to run for a while
-  // printf(1, "sleep(100)\n");
   sleep(100);
-  // printf(1, "returned from sleep\n");
 
   measure(20, start_time, fd);
 
@@ -140,13 +87,10 @@ int main() {
 
   if (fd >= 0) {
     close(fd);
-    // printf(1, "closed csv file\n");
   }
 
   for (i = 0; i < TOTAL_PROCESSES; i++) {
-    // wait();
-    int pid = wait();
-    printf(1, "PID: %d has exited\n", pid);
+    wait();
   }
   printf(1, "All child processes have completed.\n");
   exit();
@@ -173,7 +117,6 @@ void measure(int counter, int start_time, int fd) {
           ps.pass[i],
           ps.stride[i],
           ps.rtime[i]);
-        
 
         write_csv_line(fd,
           curr_time,
