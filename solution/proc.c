@@ -75,10 +75,11 @@ int
 getticks(void)
 {
   uint xticks;
-
-  acquire(&tickslock);
+  // cprintf("acquiring ticklock\n");
+//  acquire(&tickslock);
   xticks = ticks;
-  release(&tickslock);
+  // release(&tickslock);
+  // cprintf("released ticklock\n");
   return xticks;
 }
 
@@ -101,38 +102,32 @@ global_pass_update(void) {
   // cprintf("global pass: %d\n", global_pass);
 }
 
+
+// Only called when caller holds ptable lock
 void
 process_join(struct proc* p) {
-  cprintf("process_join\n");
-  cprintf("PID: %d name: %s joining with tickets: %d\n", p->pid, p->name, p->tickets);
+  // cprintf("process_join\n");
+  // cprintf("PID: %d name: %s joining with tickets: %d\n", p->pid, p->name, p->tickets);
   global_pass_update();
-
-  int previously_holding = holding(&ptable.lock);
-  if (!previously_holding)
-    acquire(&ptable.lock);
-
   p->pass = global_pass + p->remain;
   global_tickets_update(p->tickets);
-
-  if (!previously_holding)
-    release(&ptable.lock);
 }
 
 void process_leave(struct proc* p) {
   
-  cprintf("process_leave\n");
-  cprintf("PID: %d name: %s leaving with tickets: %d\n", p->pid, p->name, p->tickets);
+  // cprintf("process_leave\n");
+  // cprintf("PID: %d name: %s leaving with tickets: %d\n", p->pid, p->name, p->tickets);
+
+  // int previously_holding = holding(&ptable.lock);
+  // if (!previously_holding)
+  //   acquire(&ptable.lock);
+
   global_pass_update();
-
-  int previously_holding = holding(&ptable.lock);
-  if (!previously_holding)
-    acquire(&ptable.lock);
-
   p->remain = p->pass - global_pass;
   global_tickets_update(-1*(p->tickets));
   
-  if (!previously_holding)
-    release(&ptable.lock);
+  // if (!previously_holding)
+  //   release(&ptable.lock);
 
   // cprintf("p->remain: %d\n", p->remain);
   return;
@@ -141,7 +136,9 @@ void process_leave(struct proc* p) {
 void
 set_tickets(struct proc* p, int newtickets) {
 
+  cprintf("set_tickets(%d)\n", newtickets);
   int oldtickets = p->tickets;
+
   int previously_holding = holding(&ptable.lock);
   if (!previously_holding)
     acquire(&ptable.lock);
@@ -171,7 +168,7 @@ get_pinfo(struct pstat* data)
   acquire(&ptable.lock);
   for (int i = 0; i < NPROC; i++) {
     struct proc p = ptable.proc[i];
-    data->inuse[i] = p.state == RUNNABLE;
+    data->inuse[i] = p.state != UNUSED;
     data->tickets[i] = p.tickets;
     data->pid[i] = p.pid;
     data->pass[i] = p.pass;
@@ -209,12 +206,14 @@ allocproc(void)
   struct proc *p;
   char *sp;
 
+  cprintf("allocproc acquiring lock\n");
   acquire(&ptable.lock);
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
       goto found;
 
+  cprintf("allocproc released lock\n");
   release(&ptable.lock);
   return 0;
 
@@ -222,6 +221,20 @@ found:
   p->state = EMBRYO;
   p->pid = nextpid++;
 
+  p->last_scheduled = 0;
+  p->last_interrupted = 0;
+  p->runtime = 0;
+
+  if (stride_scheduler) {
+    p->tickets = TICKETS_INIT;
+    p->stride = STRIDE1/p->tickets;
+    p->pass = 0;
+    p->remain = p->stride;
+    // cprintf("before joining PID: %d, name: %s | tickets: %d\n", p->pid, p->name, p->tickets);
+    process_join(p);
+  }
+
+  cprintf("allocproc released lock\n");
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -244,19 +257,6 @@ found:
   p->context = (struct context*)sp;
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
-
-  p->last_scheduled = 0;
-  p->last_interrupted = 0;
-  p->runtime = 0;
-
-  if (stride_scheduler) {
-    p->tickets = TICKETS_INIT;
-    p->stride = STRIDE1/p->tickets;
-    p->pass = 0;
-    p->remain = p->stride;
-    // cprintf("before joining PID: %d, name: %s | tickets: %d\n", p->pid, p->name, p->tickets);
-    process_join(p);
-  }
 
   return p;
 }
@@ -340,6 +340,11 @@ fork(void)
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
     kfree(np->kstack);
     np->kstack = 0;
+    if (stride_scheduler) {
+        acquire(&ptable.lock);
+        process_leave(np);
+        release(&ptable.lock);
+    }
     np->state = UNUSED;
     return -1;
   }
@@ -562,6 +567,7 @@ sched_stride(void) {
     // Enable interrupts on this processor.
     sti();
 
+    // cprintf("scheduler acquiring lock\n");
     acquire(&ptable.lock);
 
     // find process with min pass, min rtime, min pid
@@ -581,7 +587,7 @@ sched_stride(void) {
           break;
       }
       if (p != prev) {
-        // cprintf("chosen PID: %d | name: %s | stride: %d | pass: %d | rtime: %d\n", p->pid, p->name, p->stride, p->pass, p->runtime);
+        // cprintf("chosen PID: %d | name: %s | tickets: %d | stride: %d | pass: %d | rtime: %d\n", p->pid, p->name, p->tickets, p->stride, p->pass, p->runtime);
         prev = p;
       }
       // Switch to chosen process.  It is the process's job
@@ -591,12 +597,12 @@ sched_stride(void) {
       switchuvm(p);
       p->state = RUNNING;
 
-      cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
+      // cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
       p->last_scheduled = getticks();
       swtch(&(c->scheduler), p->context);
       switchkvm();
-      cprintf("returned from PID: %d name: %s\n", p->pid, p->name);
-      cprintf("Is lock held: %d\n", holding(&ptable.lock));
+      // cprintf("returned from PID: %d name: %s\n", p->pid, p->name);
+      // cprintf("Is lock held: %d\n", holding(&ptable.lock));
 
       int elapsed = p->last_interrupted - p->last_scheduled;
       p->runtime += elapsed;
@@ -607,6 +613,7 @@ sched_stride(void) {
       c->proc = 0;
     }
     release(&ptable.lock);
+    // cprintf("scheduler released lock\n");
   }
 }
 //PAGEBREAK: 42
@@ -767,6 +774,7 @@ wakeup(void *chan)
 int
 kill(int pid)
 {
+  cprintf("kill()\n");
   struct proc *p;
 
   acquire(&ptable.lock);
@@ -776,7 +784,7 @@ kill(int pid)
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING) {
         if (stride_scheduler)
-          process_leave(p);
+          process_join(p);
         p->state = RUNNABLE;
       }
       release(&ptable.lock);

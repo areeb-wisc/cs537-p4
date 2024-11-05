@@ -95,6 +95,21 @@ int main() {
     }
   }
 
+  printf(1,"debug sleep\n");
+  sleep(100);
+  struct pstat* p1 = (struct pstat*)malloc(sizeof(struct pstat));
+  int ret = getpinfo(p1);
+  printf(1, "ret = %d\n", ret);
+  printf(1, "Inuse\tPID\tTickets\tPass\tStride\tRuntime\n");
+  for (int ii = 0; ii < NPROC; ii++) {
+      printf(1, "%d\t%d\t%d\t%d\t%d\t%d\n",
+        p1->inuse[ii],
+        p1->pid[ii],
+        p1->tickets[ii],
+        p1->pass[ii],
+        p1->stride[ii],
+        p1->rtime[ii]);
+  }
 
   int start_time = uptime();
   // Allow initial processes to run for a while

@@ -94,7 +94,7 @@ sys_uptime(void)
 int
 sys_settickets(void)
 {
-  cprintf("sys_settickets()\n");
+  // cprintf("sys_settickets()\n");
 
   if (!stride_scheduler)
     return -1;
@@ -104,7 +104,7 @@ sys_settickets(void)
     return -1;
   
   if (tickets > TICKETS_MAX)
-    return -1;
+    tickets = TICKETS_MAX;
   
   if (tickets < 1)
     tickets = TICKETS_INIT;
@@ -116,7 +116,7 @@ sys_settickets(void)
 
 int
 sys_getpinfo(void) {
-  cprintf("sys_getpinfo()\n");
+  // cprintf("sys_getpinfo()\n");
 
   struct pstat *ps;
   if (argptr(0, (void*)&ps, sizeof(*ps)) < 0)
@@ -124,6 +124,6 @@ sys_getpinfo(void) {
 
   if (ps == 0)
     return -1;
-    
+
   return get_pinfo(ps);
 }
