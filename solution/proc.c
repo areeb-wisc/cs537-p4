@@ -570,7 +570,7 @@ sched_roundrobin(void) {
 }
 
 void
-sched_stride(void) {
+sched_stride_heap(void) {
 
   cprintf("Running stride scheduler\n");
   struct proc *p;
@@ -633,6 +633,70 @@ sched_stride(void) {
     // cprintf("scheduler released lock\n");
   }
 }
+
+void
+sched_stride(void) {
+
+  cprintf("Running stride scheduler\n");
+  struct proc *p;
+  struct cpu *c = mycpu();
+  c->proc = 0;
+  // struct proc* prev = 0;
+  for(;;) {
+    // Enable interrupts on this processor.
+    sti();
+
+    // cprintf("scheduler acquiring lock\n");
+    acquire(&ptable.lock);
+
+    // find process with min pass, min rtime, min pid
+    // cprintf("selecting process\n");
+    struct proc* minproc = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+      if(p->state == RUNNABLE) {
+        if (minproc == 0 || compare(p, minproc) < 0) {
+          minproc = p;
+          // cprintf("minproc PID: %d\n", p->pid);
+        }
+      }
+    }
+
+    // for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    //   if(p->pid == minproc->pid)
+    //     break;
+    // }
+    if (minproc != 0) {
+      p = minproc;
+      // cprintf("scheduler switching to RUNNABLE process: %s at %d ticks\n", p->name, getticks());
+      // Switch to chosen process.  It is the process's job
+      // to release ptable.lock and then reacquire it
+      // before jumping back to us.
+      c->proc = p;
+      switchuvm(p);
+      p->state = RUNNING;
+
+      p->last_scheduled = getticks();
+      swtch(&(c->scheduler), p->context);
+      switchkvm();
+      // cprintf("returned from PID: %d name: %s\n", p->pid, p->name);
+      // cprintf("Is lock held: %d\n", holding(&ptable.lock));
+
+      // cprintf("calculating elapsed\n");
+      uint elapsed = p->last_interrupted - p->last_scheduled;
+      // cprintf("calculatinf runtime\n");
+      p->runtime += elapsed;
+      // cprintf("calculating pass\n");
+      p->pass += (elapsed * p->stride);
+      // cprintf("PID: %d elapsed: %d runtime: %d pass: %d\n", p->pid, elapsed, p->runtime, p->pass);
+      // Process is done running for now.
+      // It should have changed its p->state before coming back.
+      c->proc = 0;
+    }
+    release(&ptable.lock);
+    // cprintf("scheduler released lock\n");
+  }
+}
+
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.

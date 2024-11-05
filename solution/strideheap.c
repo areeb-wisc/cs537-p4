@@ -111,17 +111,32 @@ void displaysorted(minheap* h) {
     printf("\n");
 }
 
-minheap heap;
 
 int main() {
     srand(0);
+    struct proc* procs[10];
     for (int i = 0; i < 10; i++) {
-        heap.size = 0;
+
         for (int j = 0; j < 10; j++)
-            push(&heap, randproc());
+            procs[j] = randproc();
+        
+        minheap heap;
+        heap.size = 0;
+
+        for (int j = 0; j < 10; j++)
+            push(&heap, procs[j]);
+        struct proc* minproc1 = getmin(&heap);
+
+        struct proc* minproc2 = procs[0];
+        for (int j = 1; j < 10; j++) {
+            if (compare(procs[j], minproc2) < 0)
+                minproc2 = procs[j];
+        }
+
         // displaysorted(&heap);
-        struct proc* minproc = getmin(&heap);
-        printf("minproc = [PID: %d | pass: %d | rtime: %d]\n\n", minproc->pid, minproc->pass, minproc->runtime);
+        printf("minproc1 = [PID: %d | pass: %d | rtime: %d]\n\n", minproc1->pid, minproc1->pass, minproc1->runtime);
+        printf("minproc2 = [PID: %d | pass: %d | rtime: %d]\n\n", minproc2->pid, minproc2->pass, minproc2->runtime);
+
     }
     return 0;
 }
