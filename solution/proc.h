@@ -12,10 +12,10 @@ struct cpu {
 
 extern struct cpu cpus[NCPU];
 extern int ncpu;
-extern int global_tickets;
-extern int global_stride;
-extern int global_pass;
-extern int last_global_pass_update;
+extern uint global_tickets;
+extern uint global_stride;
+extern uint global_pass;
+extern uint last_global_pass_update;
 extern int stride_scheduler;
 
 //PAGEBREAK: 17
@@ -56,13 +56,13 @@ struct proc {
   char name[16];               // Process name (debugging)
 
   // stride scheduling
-  int tickets;                 // number of tickets
-  int stride;                  // this process's stride
-  int pass;                    // this process's pass
+  uint tickets;                 // number of tickets
+  uint stride;                  // this process's stride
+  uint pass;                    // this process's pass
   int remain;                  // this process's remainining stride
-  int last_scheduled;           // the tick at which this process was last scheduled
-  int last_interrupted;        // the tick at which this process was last interrupted
-  int runtime;                 // total ticks this process has run for
+  uint last_scheduled;           // the tick at which this process was last scheduled
+  uint last_interrupted;        // the tick at which this process was last interrupted
+  uint runtime;                 // total ticks this process has run for
 };
 
 // Process memory is laid out contiguously, low addresses first:

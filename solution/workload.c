@@ -7,8 +7,8 @@
 #define INITIAL_PROCESSES 10
 #define ADDITIONAL_PROCESSES 6
 #define TOTAL_PROCESSES (INITIAL_PROCESSES+ADDITIONAL_PROCESSES)
-// #define WORKLOAD_TIME 100000000
-#define WORKLOAD_TIME 1000
+#define WORKLOAD_TIME 100000000
+// #define WORKLOAD_TIME 10000
 
 #define CSVHEADER "Time,PID,Tickets,Pass,Stride,Runtime\n"
 #define MAX_INT_STR_LENGTH 12   // Max length for integer string representation
@@ -35,6 +35,7 @@ int main() {
   printf(1, "error\n");
   #endif
 
+  printf(1, "CSV_HEADER = %s\n", CSVHEADER);
   // struct pstat* p1 = (struct pstat*)malloc(sizeof(struct pstat));
   // int ret = getpinfo(p1);
   // printf(1, "ret = %d\n", ret);
@@ -139,10 +140,13 @@ int main() {
 
   if (fd >= 0) {
     close(fd);
+    // printf(1, "closed csv file\n");
   }
 
   for (i = 0; i < TOTAL_PROCESSES; i++) {
-    wait();
+    // wait();
+    int pid = wait();
+    printf(1, "PID: %d has exited\n", pid);
   }
   printf(1, "All child processes have completed.\n");
   exit();
@@ -169,6 +173,7 @@ void measure(int counter, int start_time, int fd) {
           ps.pass[i],
           ps.stride[i],
           ps.rtime[i]);
+        
 
         write_csv_line(fd,
           curr_time,

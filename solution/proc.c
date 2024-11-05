@@ -8,10 +8,10 @@
 #include "spinlock.h"
 #include "pstat.h"
 
-int global_tickets = 0;
-int global_pass = 0;
-int global_stride = 0;
-int last_global_pass_update = 0;
+uint global_tickets = 0;
+uint global_pass = 0;
+uint global_stride = 0;
+uint last_global_pass_update = 0;
 
 struct {
   struct spinlock lock;
@@ -71,7 +71,7 @@ myproc(void) {
   return p;
 }
 
-int
+uint
 getticks(void)
 {
   uint xticks;
@@ -96,7 +96,7 @@ global_tickets_update(int delta) {
 
 void
 global_pass_update(void) {
-  int elapsed = getticks() - last_global_pass_update;
+  uint elapsed = getticks() - last_global_pass_update;
   last_global_pass_update += elapsed;
   global_pass += (global_stride * elapsed);
   // cprintf("global pass: %d\n", global_pass);
@@ -124,7 +124,7 @@ void process_leave(struct proc* p) {
 
   global_pass_update();
   p->remain = p->pass - global_pass;
-  global_tickets_update(-1*(p->tickets));
+  global_tickets_update(-p->tickets);
   
   // if (!previously_holding)
   //   release(&ptable.lock);
@@ -145,8 +145,8 @@ set_tickets(struct proc* p, int newtickets) {
 
   process_leave(p);
 
-  int newstride = STRIDE1/newtickets;
-  int newremain = (p->remain * newstride) / p->stride;
+  uint newstride = STRIDE1/newtickets;
+  uint newremain = (p->remain * newstride) / p->stride;
 
   p->tickets = newtickets;
   p->stride = newstride;
@@ -164,11 +164,21 @@ int
 get_pinfo(struct pstat* data)
 {
   // cprintf("get_pinfo()\n");
+  // char *states[] = {
+  //   [UNUSED]    "unused",
+  //   [EMBRYO]    "embryo",
+  //   [SLEEPING]  "sleep ",
+  //   [RUNNABLE]  "runble",
+  //   [RUNNING]   "run   ",
+  //   [ZOMBIE]    "zombie"
+  // };
 
   acquire(&ptable.lock);
   for (int i = 0; i < NPROC; i++) {
     struct proc p = ptable.proc[i];
-    data->inuse[i] = (p.state == EMBRYO || p.state == SLEEPING || p.state == RUNNABLE || p.state == RUNNING || p.state == ZOMBIE);
+    data->inuse[i] = (p.state == EMBRYO || p.state == RUNNABLE || p.state == RUNNING || p.state == ZOMBIE);
+    // cprintf("PID: %d | State: %s\n", p.pid, states[p.state]);
+    // data->inuse[i] = (p.state > 0 && p.state < NELEM(states) && states[p.state]);
     data->tickets[i] = p.tickets;
     data->pid[i] = p.pid;
     data->pass[i] = p.pass;
@@ -608,10 +618,13 @@ sched_stride(void) {
       // cprintf("returned from PID: %d name: %s\n", p->pid, p->name);
       // cprintf("Is lock held: %d\n", holding(&ptable.lock));
 
-      int elapsed = p->last_interrupted - p->last_scheduled;
+      // cprintf("calculating elapsed\n");
+      uint elapsed = p->last_interrupted - p->last_scheduled;
+      // cprintf("calculatinf runtime\n");
       p->runtime += elapsed;
+      // cprintf("calculating pass\n");
       p->pass += (elapsed * p->stride);
-
+      // cprintf("PID: %d elapsed: %d runtime: %d pass: %d\n", p->pid, elapsed, p->runtime, p->pass);
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
